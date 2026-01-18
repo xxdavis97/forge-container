@@ -1,0 +1,29 @@
+# Java Application (Build from source with Maven)
+# Build: ./run_container.sh build -f example-forge-files/Forgefile.java-maven -t java-maven-app:v1.0
+# Run:   ./run_container.sh run java-maven-app:v1.0
+#
+# Note: This includes the full JDK and Maven in the final image.
+# A multi-stage build would be more efficient for production.
+
+FROM alpine:3.19
+
+# Install OpenJDK 17 and Maven
+RUN apk add --no-cache openjdk17-jdk maven
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+
+WORKDIR /app
+
+# Copy Maven configuration first (for better caching)
+COPY pom.xml /app/
+
+# Download dependencies (cached if pom.xml unchanged)
+RUN mvn dependency:go-offline
+
+# Copy source code
+COPY src /app/src/
+
+# Build the application
+RUN mvn package -DskipTests
+
+ENTRYPOINT ["java", "-jar", "target/app-1.0-SNAPSHOT.jar"]
