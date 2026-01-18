@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::Write;
 use std::collections::HashMap;
-use log::debug;
+use log::{debug, info};
+
+use crate::imagebuilder::ImageBuilder;
+use crate::container::run_container_from_image;
 
 const LAYERS: &str = "layers";
 const MANIFESTS: &str = "manifests";
@@ -110,4 +113,98 @@ impl ImageStore {
     pub fn layer_exists(&self, digest: &str) -> bool {
         self.get_layer_path(digest).exists()
     }
+
+    /// Load image configuration
+    pub fn load_config(&self, name: &str, tag: &str) -> Result<ImageConfig, Box<dyn std::error::Error>> {
+        let config_path = self.root.join(MANIFESTS)
+            .join(name)
+            .join(format!("{}.config", tag));
+        let config_json = fs::read_to_string(config_path)?;
+        let config: ImageConfig = serde_json::from_str(&config_json)?;
+        Ok(config)
+    }
+}
+
+/// Build an image from a Forgefile
+pub fn build_image(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    // Parse args: build -f Containerfile -t myapp:v1.0
+    let mut containerfile_path = PathBuf::from("ForgeFile");
+    let mut image_name = "app";
+    let mut image_tag = "latest";
+
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-f" | "--file" => {
+                containerfile_path = PathBuf::from(&args[i + 1]);
+                i += 2;
+            }
+            "-t" | "--tag" => {
+                let parts: Vec<&str> = args[i + 1].split(':').collect();
+                image_name = parts[0];
+                image_tag = parts.get(1).unwrap_or(&"latest");
+                i += 2;
+            }
+            _ => i += 1,
+        }
+    }
+
+    // Create image store
+    let store_path = PathBuf::from(std::env::var("HOME")?)
+        .join(".container-runtime/images");
+    let store = ImageStore::new(store_path)?;
+
+    // Build the image
+    info!("Building image {}:{}", image_name, image_tag);
+    let builder = ImageBuilder::new(store);
+    builder.build(&containerfile_path, image_name, image_tag)?;
+
+    Ok(())
+}
+
+/// Run a container from an image
+pub fn run_image(image_ref: &str) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Running container from image: {}", image_ref);
+
+    // Parse image reference (e.g., "myapp:v1.0")
+    let parts: Vec<&str> = image_ref.split(':').collect();
+    let name = parts[0];
+    let tag = parts.get(1).unwrap_or(&"latest");
+
+    // Load image from store
+    let store_path = PathBuf::from(std::env::var("HOME")?)
+        .join(".container-runtime/images");
+    let store = ImageStore::new(store_path)?;
+
+    debug!("Loading image {}:{}...", name, tag);
+    let manifest = store.load_manifest(name, tag)?;
+
+    // Load config
+    let config = store.load_config(name, tag)?;
+
+    // Create temporary rootfs and extract layers
+    let container_id = uuid::Uuid::new_v4();
+    let rootfs = PathBuf::from(format!("/tmp/container-{}", container_id));
+    fs::create_dir_all(&rootfs)?;
+
+    info!("Extracting {} layers...", manifest.layers.len());
+    for (i, layer_digest) in manifest.layers.iter().enumerate() {
+        debug!("  [{}/{}] Extracting layer {}...",
+            i + 1, manifest.layers.len(), &layer_digest[..16]);
+
+        let layer_path = store.get_layer_path(layer_digest);
+        std::process::Command::new("tar")
+            .args(&["-xzf", layer_path.to_str().unwrap(), "-C", rootfs.to_str().unwrap()])
+            .status()?;
+    }
+
+    debug!("Rootfs ready at {:?}", rootfs);
+    debug!("Container config - workdir: {}, env: {:?}, entrypoint: {:?}",
+        config.working_dir, config.env, config.entrypoint);
+
+    // Run container using the container runtime
+    let container_name = format!("img-{}", container_id);
+    run_container_from_image(rootfs.to_str().unwrap(), &config, &container_name);
+
+    // Never reaches here because run_container_from_image never returns
 }

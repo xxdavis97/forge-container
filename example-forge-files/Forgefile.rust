@@ -1,0 +1,30 @@
+# Rust Application (Build from source)
+# Build: ./run_container.sh build -f example-forge-files/Forgefile.rust -t rust-app:v1.0
+# Run:   ./run_container.sh run rust-app:v1.0
+#
+# Note: Rust compiles to a static binary, so multi-stage builds
+# would allow a much smaller final image (just the binary).
+
+FROM alpine:3.19
+
+# Install Rust and Cargo
+RUN apk add --no-cache rust cargo
+
+WORKDIR /app
+
+# Copy Cargo files first (for better caching)
+COPY Cargo.toml /app/
+COPY Cargo.lock /app/
+
+# Create dummy src to cache dependencies
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release
+RUN rm -rf src
+
+# Copy actual source code
+COPY src /app/src/
+
+# Build release binary (dependencies already cached)
+RUN cargo build --release
+
+ENTRYPOINT ["./target/release/app"]

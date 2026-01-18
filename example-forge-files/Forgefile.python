@@ -1,0 +1,24 @@
+# Python Application
+# Build: ./run_container.sh build -f example-forge-files/Forgefile.python -t python-app:v1.0
+# Run:   ./run_container.sh run python-app:v1.0
+
+FROM alpine:3.19
+
+# Install Python and pip
+RUN apk add --no-cache python3 py3-pip
+
+WORKDIR /app
+
+# Copy requirements first (for better caching)
+COPY requirements.txt /app/
+
+# Install dependencies
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+
+# Copy application code
+COPY app.py /app/
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["python3", "app.py"]
