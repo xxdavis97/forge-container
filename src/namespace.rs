@@ -1,31 +1,31 @@
 use nix::sched::{unshare, CloneFlags};
 use std::process;
+use log::{debug, error};
 
 pub fn create_namespaces_without_network() {
-    println!("Creating namespaces (without network)...");
-    
+    debug!("Creating namespaces (PID, Mount, UTS)...");
+
     let flags = CloneFlags::CLONE_NEWPID |
                 CloneFlags::CLONE_NEWNS |
                 CloneFlags::CLONE_NEWUTS;
-    // NO CLONE_NEWNET yet!
-    
+
     if let Err(e) = unshare(flags) {
-        eprintln!("Failed to create namespaces: {}", e);
+        error!("Failed to create namespaces: {}", e);
         process::exit(1);
     }
-    
-    println!("Namespaces created (PID, Mount, UTS)");
+
+    debug!("Namespaces created");
 }
 
 pub fn create_network_namespace() {
-    println!("Creating network namespace...");
-    
+    debug!("Creating network namespace...");
+
     let flags = CloneFlags::CLONE_NEWNET;
-    
+
     if let Err(e) = unshare(flags) {
-        eprintln!("Failed to create network namespace: {}", e);
+        error!("Failed to create network namespace: {}", e);
         process::exit(1);
     }
-    
-    println!("Network namespace created");
+
+    debug!("Network namespace created");
 }
